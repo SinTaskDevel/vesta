@@ -2,12 +2,22 @@
 
 define('NO_AUTH_REQUIRED',true);
 
+/**
+ * Edit by Aditya Wikardiyan (@aditatsintask) 
+ * Add Security Patch :
+ * - URL Allowed, set URL that is allowed to show login form
+ * - Cooling time where user input false login credentials
+ */
+
 
 // Main include
 include($_SERVER['DOCUMENT_ROOT']."/inc/main.php");
 
-
-$TAB = 'LOGIN';
+$SECPATCH       = '1.1.1';
+$TAB            = 'LOGIN / SecPatch-v' . $SECPATCH;
+$URLALLOW       = 'YOUR_VESTACP_URL'; // Fill with your VestaCP domain access
+$PORTALLOW      = 'YOUR_VESTACP_PORT'; // Fill with your VestaCP Port
+$COOLINGTIME    = 240; // Fill with your cooling time login
 
 // Logout
 if (isset($_GET['logout'])) {
@@ -29,93 +39,114 @@ if (isset($_SESSION['user'])) {
     exit;
 }
 
+// Add auth time (cooling time) if login with wrong credentials
+$auth_time_state = strtotime(date("d-m-Y H:i:s"));
+if (!isset($_SESSION['auth_time'])) {
+    $_SESSION['auth_time'] = $auth_time_state;
+}
+
 // Basic auth
-if (isset($_POST['user']) && isset($_POST['password'])) {
-    if(isset($_SESSION['token']) && isset($_POST['token']) && $_POST['token'] == $_SESSION['token']) {
-        $v_user = escapeshellarg($_POST['user']);
-        $v_ip = escapeshellarg($_SERVER['REMOTE_ADDR']);
+if($_SERVER['HTTP_HOST'] === ($URLALLOW . ":" . $PORTALLOW)) {
+    if (isset($_POST['user']) && isset($_POST['password'])) {
+        if(isset($_SESSION['token']) && isset($_POST['token']) && $_POST['token'] == $_SESSION['token']) {
+            $auth_time_remain = $_SESSION['auth_time'] - $auth_time_state;
+            $auth_time_show = floor($auth_time_remain/60);
 
-        // Get user's salt
-        $output = '';
-        exec (VESTA_CMD."v-get-user-salt ".$v_user." ".$v_ip." json" , $output, $return_var);
-        $pam = json_decode(implode('', $output), true);
-        if ( $return_var > 0 ) {
-            $ERROR = "<a class=\"error\">".__('Invalid username or password')."</a>";
-        } else {
-            $user = $_POST['user'];
-            $password = $_POST['password'];
-            $salt = $pam[$user]['SALT'];
-            $method = $pam[$user]['METHOD'];
+            if($auth_time_show < 1) {
+                $v_user = escapeshellarg($_POST['user']);
+                $v_ip = escapeshellarg($_SERVER['REMOTE_ADDR']);
 
-            if ($method == 'md5' ) {
-                $hash = crypt($password, '$1$'.$salt.'$');
-            }
-            if ($method == 'sha-512' ) {
-                $hash = crypt($password, '$6$rounds=5000$'.$salt.'$');
-                $hash = str_replace('$rounds=5000','',$hash);
-            }
-            if ($method == 'des' ) {
-                $hash = crypt($password, $salt);
-            }
-
-            // Send hash via tmp file
-            $v_hash = exec('mktemp -p /tmp');
-            $fp = fopen($v_hash, "w");
-            fwrite($fp, $hash."\n");
-            fclose($fp);
-
-            // Check user hash
-            exec(VESTA_CMD ."v-check-user-hash ".$v_user." ".$v_hash." ".$v_ip,  $output, $return_var);
-            unset($output);
-
-            // Remove tmp file
-            unlink($v_hash);
-
-            // Check API answer
-            if ( $return_var > 0 ) {
-                $ERROR = "<a class=\"error\">".__('Invalid username or password')."</a>";
-            } else {
-
-                // Make root admin user
-                if ($_POST['user'] == 'root') $v_user = 'admin';
-
-                // Get user speciefic parameters
-                exec (VESTA_CMD . "v-list-user ".$v_user." json", $output, $return_var);
-                $data = json_decode(implode('', $output), true);
-
-                // Define session user
-                $_SESSION['user'] = key($data);
-                $v_user = $_SESSION['user'];
-
-                // Get user favorites
-                get_favourites();
-
-                // Define language
+                // Get user's salt
                 $output = '';
-                exec (VESTA_CMD."v-list-sys-languages json", $output, $return_var);
-                $languages = json_decode(implode('', $output), true);
-                if (in_array($data[$v_user]['LANGUAGE'], $languages)){
-                    $_SESSION['language'] = $data[$v_user]['LANGUAGE'];
-                } else {
-                    $_SESSION['language'] = 'en';
-                }
+                exec (VESTA_CMD."v-get-user-salt ".$v_user." ".$v_ip." json" , $output, $return_var);
+                $pam = json_decode(implode('', $output), true);
+                if ( $return_var > 0 ) {
+                    // Add Cooling Time to 3 minute
+                    $_SESSION['auth_time'] = $_SESSION['auth_time']+$COOLINGTIME;
 
-                // Regenerate session id to prevent session fixation
-                session_regenerate_id();
-
-                // Redirect request to control panel interface
-                if (!empty($_SESSION['request_uri'])) {
-                    header("Location: ".$_SESSION['request_uri']);
-                    unset($_SESSION['request_uri']);
-                    exit;
+                    $ERROR = "<a class=\"error\">".__('Invalid username or password')."</a>";
                 } else {
-                    header("Location: /");
-                    exit;
+                    $user = $_POST['user'];
+                    $password = $_POST['password'];
+                    $salt = $pam[$user]['SALT'];
+                    $method = $pam[$user]['METHOD'];
+
+                    if ($method == 'md5' ) {
+                        $hash = crypt($password, '$1$'.$salt.'$');
+                    }
+                    if ($method == 'sha-512' ) {
+                        $hash = crypt($password, '$6$rounds=5000$'.$salt.'$');
+                        $hash = str_replace('$rounds=5000','',$hash);
+                    }
+                    if ($method == 'des' ) {
+                        $hash = crypt($password, $salt);
+                    }
+
+                    // Send hash via tmp file
+                    $v_hash = exec('mktemp -p /tmp');
+                    $fp = fopen($v_hash, "w");
+                    fwrite($fp, $hash."\n");
+                    fclose($fp);
+
+                    // Check user hash
+                    exec(VESTA_CMD ."v-check-user-hash ".$v_user." ".$v_hash." ".$v_ip,  $output, $return_var);
+                    unset($output);
+
+                    // Remove tmp file
+                    unlink($v_hash);
+
+                    // Check API answer
+                    if ( $return_var > 0 ) {
+                        // Add Cooling Time to 3 minute
+                        $_SESSION['auth_time'] = $_SESSION['auth_time']+$COOLINGTIME;
+
+                        $ERROR = "<a class=\"error\">".__('Invalid username or password')."</a>";
+                    } else {
+
+                        // Make root admin user
+                        if ($_POST['user'] == 'root') $v_user = 'admin';
+
+                        // Get user speciefic parameters
+                        exec (VESTA_CMD . "v-list-user ".$v_user." json", $output, $return_var);
+                        $data = json_decode(implode('', $output), true);
+
+                        // Define session user
+                        $_SESSION['user'] = key($data);
+                        $v_user = $_SESSION['user'];
+
+                        // Get user favorites
+                        get_favourites();
+
+                        // Define language
+                        $output = '';
+                        exec (VESTA_CMD."v-list-sys-languages json", $output, $return_var);
+                        $languages = json_decode(implode('', $output), true);
+                        if (in_array($data[$v_user]['LANGUAGE'], $languages)){
+                            $_SESSION['language'] = $data[$v_user]['LANGUAGE'];
+                        } else {
+                            $_SESSION['language'] = 'en';
+                        }
+
+                        // Regenerate session id to prevent session fixation
+                        session_regenerate_id();
+
+                        // Redirect request to control panel interface
+                        if (!empty($_SESSION['request_uri'])) {
+                            header("Location: ".$_SESSION['request_uri']);
+                            unset($_SESSION['request_uri']);
+                            exit;
+                        } else {
+                            header("Location: /");
+                            exit;
+                        }
+                    }
                 }
+            } else {
+                $ERROR = "<a class=\"error\">".__('Please wait for ' . $auth_time_show . ' minute(s)')."</a>";
             }
+        } else {
+            $ERROR = "<a class=\"error\">".__('Invalid tokenizing')."</a>";
         }
-    } else {
-        $ERROR = "<a class=\"error\">".__('Invalid or missing token')."</a>";
     }
 }
 
@@ -150,4 +181,34 @@ $_SESSION['token'] = md5(uniqid(mt_rand(), true));
 
 require_once($_SERVER['DOCUMENT_ROOT'].'/inc/i18n/'.$_SESSION['language'].'.php');
 require_once('../templates/header.html');
-require_once('../templates/login.html');
+
+if($_SERVER['HTTP_HOST'] === ($URLALLOW . ":" . $PORTALLOW)) {
+    require_once('../templates/login.html');
+} else {
+    ?>
+        <center>
+            <table class="login">
+                <tr>
+                    <td>
+                        <table>
+                            <tr>
+                                <td style="padding: 0 10px 0 42px; height: 280px; width: 170px;">
+                                    <h1>&middot; &middot; &middot;</h1>
+                                </td>
+                                <td style="padding: 20px 0 0 0;">
+                                    <table class="login-box">
+                                        <h2>Login?</h2>
+                                        <p>
+                                            You can't login to the Earth.
+                                        </p>
+                                    </table>
+                                </td>
+                            </tr>
+                        </table>
+                    </tr>
+                </table>
+            </center>
+        </body>
+    </html>
+    <?php
+}
