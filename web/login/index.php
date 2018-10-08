@@ -3,7 +3,8 @@
 define('NO_AUTH_REQUIRED',true);
 
 /**
- * Edit by Aditya Wikardiyan (@aditatsintask) 
+ * Created by Aditya Wikardiyan (@aditatsintask) 
+ *
  * Add Security Patch :
  * - URL Allowed, set URL that is allowed to show login form
  * - Cooling time where user input false login credentials
@@ -13,7 +14,7 @@ define('NO_AUTH_REQUIRED',true);
 // Main include
 include($_SERVER['DOCUMENT_ROOT']."/inc/main.php");
 
-$SECPATCH       = '1.1.1';
+$SECPATCH       = '1.1.4';
 $TAB            = 'LOGIN / SecPatch-v' . $SECPATCH;
 $URLALLOW       = 'YOUR_VESTACP_URL'; // Fill with your VestaCP domain access
 $PORTALLOW      = 'YOUR_VESTACP_PORT'; // Fill with your VestaCP Port
@@ -45,13 +46,13 @@ if (!isset($_SESSION['auth_time'])) {
     $_SESSION['auth_time'] = $auth_time_state;
 }
 
+$auth_time_remain = $_SESSION['auth_time'] - $auth_time_state;
+$auth_time_show = floor($auth_time_remain/60);
+
 // Basic auth
 if($_SERVER['HTTP_HOST'] === ($URLALLOW . ":" . $PORTALLOW)) {
     if (isset($_POST['user']) && isset($_POST['password'])) {
         if(isset($_SESSION['token']) && isset($_POST['token']) && $_POST['token'] == $_SESSION['token']) {
-            $auth_time_remain = $_SESSION['auth_time'] - $auth_time_state;
-            $auth_time_show = floor($auth_time_remain/60);
-
             if($auth_time_show < 1) {
                 $v_user = escapeshellarg($_POST['user']);
                 $v_ip = escapeshellarg($_SERVER['REMOTE_ADDR']);
@@ -182,9 +183,7 @@ $_SESSION['token'] = md5(uniqid(mt_rand(), true));
 require_once($_SERVER['DOCUMENT_ROOT'].'/inc/i18n/'.$_SESSION['language'].'.php');
 require_once('../templates/header.html');
 
-if($_SERVER['HTTP_HOST'] === ($URLALLOW . ":" . $PORTALLOW)) {
-    require_once('../templates/login.html');
-} else {
+if($_SERVER['HTTP_HOST'] !== ($URLALLOW . ":" . $PORTALLOW)) {
     ?>
         <center>
             <table class="login">
@@ -199,7 +198,7 @@ if($_SERVER['HTTP_HOST'] === ($URLALLOW . ":" . $PORTALLOW)) {
                                     <table class="login-box">
                                         <h2>Login?</h2>
                                         <p>
-                                            You can't login to the Earth.
+                                            You can't login to the Earth from here.
                                         </p>
                                     </table>
                                 </td>
@@ -211,4 +210,33 @@ if($_SERVER['HTTP_HOST'] === ($URLALLOW . ":" . $PORTALLOW)) {
         </body>
     </html>
     <?php
+} else if($auth_time_show > 0) {
+    ?>
+        <center>
+            <table class="login">
+                <tr>
+                    <td>
+                        <table>
+                            <tr>
+                                <td style="padding: 0 10px 0 42px; height: 280px; width: 170px;">
+                                    <h1>&middot; &middot; &middot;</h1>
+                                </td>
+                                <td style="padding: 20px 0 0 0;">
+                                    <table class="login-box">
+                                        <h2>You can't Login!</h2>
+                                        <p>
+                                            Please wait <?php echo $auth_time_show;?> minute(s).
+                                        </p>
+                                    </table>
+                                </td>
+                            </tr>
+                        </table>
+                    </tr>
+                </table>
+            </center>
+        </body>
+    </html>
+    <?php
+} else {
+    require_once('../templates/login.html');
 }
