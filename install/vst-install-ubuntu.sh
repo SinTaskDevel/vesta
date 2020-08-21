@@ -19,17 +19,17 @@ codename="$(lsb_release -s -c)"
 vestacp="$VESTA/install/$VERSION/$release"
 
 # Defining software pack for all distros
-software="apache2 apache2.2-common apache2-suexec-custom apache2-utils
+software="nginx apache2 apache2.2-common apache2-suexec-custom apache2-utils
     apparmor-utils awstats bc bind9 bsdmainutils bsdutils clamav-daemon
     cron curl dnsutils dovecot-imapd dovecot-pop3d e2fslibs e2fsprogs exim4
     exim4-daemon-heavy expect fail2ban flex ftp git idn imagemagick
     libapache2-mod-fcgid libapache2-mod-php libapache2-mod-rpaf
-    libapache2-mod-ruid2 lsof mc mysql-client mysql-common mysql-server nginx
+    libapache2-mod-ruid2 lsof mc mysql-client mysql-common mysql-server
     ntpdate php-cgi php-common php-curl php-fpm phpmyadmin php-mysql
     phppgadmin php-pgsql postgresql postgresql-contrib proftpd-basic quota
     roundcube-core roundcube-mysql roundcube-plugins rrdtool rssh spamassassin
     sudo vesta vesta-ioncube vesta-nginx vesta-php vesta-softaculous
-    vim-common vsftpd webalizer whois zip"
+    vim-common vsftpd webalizer whois zip net-tools"
 
 # Fix for old releases
 if [[ ${release:0:2} -lt 16 ]]; then
@@ -240,7 +240,7 @@ if [ "x$(id -u)" != 'x0' ]; then
 fi
 
 # Checking admin user account
-if [ ! -z "$(grep ^admin: /etc/passwd /etc/group)" ] && [ -z "$force" ]; then
+if [ ! -z "$(grep ^admin: /etc/passwd)" ] && [ -z "$force" ]; then
     echo 'Please remove admin user account before proceeding.'
     echo 'If you want to do it automatically run installer with -f option:'
     echo -e "Example: bash $0 --force\n"
@@ -446,6 +446,13 @@ fi
 # Updating system
 apt-get -y upgrade
 check_result $? 'apt-get upgrade failed'
+
+# Checking universe repository
+if [[ ${release:0:2} -gt 16 ]]; then
+    if [ -z "$(grep universe /etc/apt/sources.list)" ]; then
+        add-apt-repository -y universe
+    fi
+fi
 
 # Installing nginx repo
 apt=/etc/apt/sources.list.d
@@ -681,6 +688,7 @@ chmod 755 /usr/bin/rssh
 mkdir -p /etc/sudoers.d
 cp -f $vestacp/sudo/admin /etc/sudoers.d/
 chmod 440 /etc/sudoers.d/admin
+sed -i "s/%admin.*ALL=(ALL).*/# sudo is limited to vesta scripts/" /etc/sudoers
 
 # Configuring system env
 echo "export VESTA='$VESTA'" > /etc/profile.d/vesta.sh
@@ -977,8 +985,9 @@ if [ "$mysql" = 'yes' ]; then
     check_result $? "mysql start failed"
 
     # Securing MySQL/MariaDB installation
-    mysqladmin -u root password $vpass
-    echo -e "[client]\npassword='$vpass'\n" > /root/.my.cnf
+    mpass=$(gen_pass)
+    mysqladmin -u root password $mpass
+    echo -e "[client]\npassword='$mpass'\n" > /root/.my.cnf
     chmod 600 /root/.my.cnf
     mysql -e "DELETE FROM mysql.user WHERE User=''"
     mysql -e "DROP DATABASE test" >/dev/null 2>&1
@@ -991,18 +1000,27 @@ if [ "$mysql" = 'yes' ]; then
         cp -f $vestacp/pma/apache.conf /etc/phpmyadmin/
         ln -s /etc/phpmyadmin/apache.conf /etc/apache2/conf.d/phpmyadmin.conf
     fi
-    cp -f $vestacp/pma/config.inc.php /etc/phpmyadmin/
+    if [[ ${release:0:2} -ge 18 ]]; then
+        mysql < /usr/share/phpmyadmin/sql/create_tables.sql
+        p=$(grep dbpass /etc/phpmyadmin/config-db.php |cut -f 2 -d "'")
+        mysql -e "GRANT ALL ON phpmyadmin.*
+            TO phpmyadmin@localhost IDENTIFIED BY '$p'"
+    else
+        cp -f $vestacp/pma/config.inc.php /etc/phpmyadmin/
+    fi
     chmod 777 /var/lib/phpmyadmin/tmp
 fi
+
 
 #----------------------------------------------------------#
 #                   Configure PostgreSQL                   #
 #----------------------------------------------------------#
 
 if [ "$postgresql" = 'yes' ]; then
+    ppass=$(gen_pass)
     cp -f $vestacp/postgresql/pg_hba.conf /etc/postgresql/*/main/
     service postgresql restart
-    sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD '$vpass'"
+    sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD '$ppass'"
 
     # Configuring phpPgAdmin
     if [ "$apache" = 'yes' ]; then
@@ -1078,7 +1096,18 @@ fi
 
 if [ "$dovecot" = 'yes' ]; then
     gpasswd -a dovecot mail
-    cp -rf $vestacp/dovecot /etc/
+    if [[ ${release:0:2} -ge 18 ]]; then
+        cp -r /usr/local/vesta/install/debian/9/dovecot /etc/
+        if [ -z "$(grep yes /etc/dovecot/conf.d/10-mail.conf)" ]; then
+            echo "namespace inbox {" >> /etc/dovecot/conf.d/10-mail.conf
+            echo "  inbox = yes" >> /etc/dovecot/conf.d/10-mail.conf
+            echo "}" >> /etc/dovecot/conf.d/10-mail.conf
+            echo "first_valid_uid = 1000" >> /etc/dovecot/conf.d/10-mail.conf
+            echo "mbox_write_locks = fcntl" >> /etc/dovecot/conf.d/10-mail.conf
+        fi
+    else
+        cp -rf $vestacp/dovecot /etc/
+    fi
     cp -f $vestacp/logrotate/dovecot /etc/logrotate.d/
     chown -R root:root /etc/dovecot*
     update-rc.d dovecot defaults
@@ -1127,29 +1156,42 @@ if [ "$exim" = 'yes' ] && [ "$mysql" = 'yes' ]; then
         cp -f $vestacp/roundcube/apache.conf /etc/roundcube/
         ln -s /etc/roundcube/apache.conf /etc/apache2/conf.d/roundcube.conf
     fi
-    cp -f $vestacp/roundcube/main.inc.php /etc/roundcube/
-    cp -f  $vestacp/roundcube/db.inc.php /etc/roundcube/
-    chmod 640 /etc/roundcube/debian-db*
-    chown root:www-data /etc/roundcube/debian-db*
-    cp -f $vestacp/roundcube/vesta.php \
-        /usr/share/roundcube/plugins/password/drivers/
-    cp -f $vestacp/roundcube/config.inc.php /etc/roundcube/plugins/password/
-    r="$(gen_pass)"
-    mysql -e "CREATE DATABASE roundcube"
-    mysql -e "GRANT ALL ON roundcube.*
-        TO roundcube@localhost IDENTIFIED BY '$r'"
-    sed -i "s/%password%/$r/g" /etc/roundcube/db.inc.php
-    touch /var/log/roundcube/errors
-    chmod 640 /var/log/roundcube/errors
-    chown www-data:adm /var/log/roundcube/errors
+
+    if [[ ${release:0:2} -ge 18 ]]; then
+        r=$(grep dbpass= /etc/roundcube/debian-db.php |cut -f 2 -d "'")
+        sed -i "s/default_host.*/default_host'] = 'localhost';/" \
+            /etc/roundcube/config.inc.php
+        sed -i "s/^);/'password');/" /etc/roundcube/config.inc.php
+    else
+        r="$(gen_pass)"
+        cp -f $vestacp/roundcube/main.inc.php /etc/roundcube/
+        cp -f  $vestacp/roundcube/db.inc.php /etc/roundcube/
+        sed -i "s/%password%/$r/g" /etc/roundcube/db.inc.php
+    fi
+
     if [ "$release" = '16.04' ]; then
+        # TBD: should be fixed in config repo
         mv /etc/roundcube/db.inc.php /etc/roundcube/debian-db-roundcube.php
         mv /etc/roundcube/main.inc.php /etc/roundcube/config.inc.php
         chmod 640 /etc/roundcube/debian-db-roundcube.php
         chown root:www-data /etc/roundcube/debian-db-roundcube.php
     fi
 
+    cp -f $vestacp/roundcube/vesta.php \
+        /usr/share/roundcube/plugins/password/drivers/
+    cp -f $vestacp/roundcube/config.inc.php /etc/roundcube/plugins/password/
+
+    mysql -e "CREATE DATABASE roundcube"
+    mysql -e "GRANT ALL ON roundcube.*
+        TO roundcube@localhost IDENTIFIED BY '$r'"
     mysql roundcube < /usr/share/dbconfig-common/data/roundcube/install/mysql
+
+    chmod 640 /etc/roundcube/debian-db*
+    chown root:www-data /etc/roundcube/debian-db*
+    touch /var/log/roundcube/errors
+    chmod 640 /var/log/roundcube/errors
+    chown www-data:adm /var/log/roundcube/errors
+
     php5enmod mcrypt 2>/dev/null
     phpenmod mcrypt 2>/dev/null
     if [ "$apache" = 'yes' ]; then
@@ -1204,7 +1246,7 @@ if [ ! -z "$(grep ^admin: /etc/passwd)" ] && [ "$force" = 'yes' ]; then
     mv -f /home/admin  $vst_backups/home/ >/dev/null 2>&1
     rm -f /tmp/sess_* >/dev/null 2>&1
 fi
-if [ ! -z "$(grep ^admin: /etc/group)" ] && [ "$force" = 'yes' ]; then
+if [ ! -z "$(grep ^admin: /etc/group)" ]; then
     groupdel admin > /dev/null 2>&1
 fi
 
@@ -1235,13 +1277,13 @@ fi
 
 # Configuring MySQL/MariaDB host
 if [ "$mysql" = 'yes' ]; then
-    $VESTA/bin/v-add-database-host mysql localhost root $vpass
+    $VESTA/bin/v-add-database-host mysql localhost root $mpass
     $VESTA/bin/v-add-database admin default default $(gen_pass) mysql
 fi
 
 # Configuring PostgreSQL host
 if [ "$postgresql" = 'yes' ]; then
-    $VESTA/bin/v-add-database-host pgsql localhost postgres $vpass
+    $VESTA/bin/v-add-database-host pgsql localhost postgres $ppass
     $VESTA/bin/v-add-database admin db db $(gen_pass) pgsql
 fi
 
@@ -1294,9 +1336,6 @@ $VESTA/bin/v-add-cron-vesta-autoupdate
 #----------------------------------------------------------#
 #                   Vesta Access Info                      #
 #----------------------------------------------------------#
-
-# Sending install notification to vestacp.com
-wget vestacp.com/notify/?$codename -O /dev/null -q
 
 # Comparing hostname and IP
 host_ip=$(host $servername| head -n 1 |awk '{print $NF}')

@@ -215,7 +215,11 @@ add_web_config() {
         fi
     fi
 
-    trigger="${2/.*pl/.sh}"
+    trigger="${2/%.tpl/.sh}"
+    if [[ "$2" =~ stpl$ ]]; then
+        trigger="${2/%.stpl/.sh}"
+    fi
+
     if [ -x "$WEBTPL/$1/$WEB_BACKEND/$trigger" ]; then
         $WEBTPL/$1/$WEB_BACKEND/$trigger \
             $user $domain $local_ip $HOMEDIR \
@@ -285,8 +289,10 @@ del_web_config() {
         if [[ "$2" =~ stpl$ ]]; then
             conf="$HOMEDIR/$user/conf/web/s$1.conf"
         fi
-        get_web_config_lines $WEBTPL/$1/$WEB_BACKEND/$2 $conf
-        sed -i "$top_line,$bottom_line d" $conf
+        if [ -e "$conf" ]; then
+            get_web_config_lines $WEBTPL/$1/$WEB_BACKEND/$2 $conf
+            sed -i "$top_line,$bottom_line d" $conf
+        fi
     fi
     # clean-up for both config styles if there is no more domains
     web_domain=$(grep DOMAIN $USER_DATA/web.conf |wc -l)
@@ -337,7 +343,7 @@ is_web_domain_cert_valid() {
         check_result $E_FORBIDEN "SSL Key is protected (remove pass_phrase)"
     fi
 
-    openssl s_server -quiet -cert $ssl_dir/$domain.crt \
+    openssl s_server -port 654321 -quiet -cert $ssl_dir/$domain.crt \
         -key $ssl_dir/$domain.key >> /dev/null 2>&1 &
     pid=$!
     sleep 0.5
@@ -404,6 +410,26 @@ update_domain_zone() {
         RECORD=$(idn --quiet -a -t "$RECORD")
         if [ "$TYPE" = 'CNAME' ] || [ "$TYPE" = 'MX' ]; then
             VALUE=$(idn --quiet -a -t "$VALUE")
+        fi
+
+        # Split long TXT entries into 255 chunks
+        if [ "$TYPE" = 'TXT' ]; then
+            txtlength=${#VALUE}
+            if [ $txtlength -gt 255 ]; then
+                already_chunked=0
+                if [[ $VALUE == *"\" \""* ]]; then
+                    already_chunked=1
+                fi
+                if [ $already_chunked -eq 0 ]; then
+                    if [[ ${VALUE:0:1} = '"' ]]; then
+                        txtlength=$(( $txtlength - 2 ))
+                        VALUE=${VALUE:1:txtlength}
+                    fi
+                    VALUE=$(echo $VALUE | fold -w 255 | xargs -I '$' echo -n ' "$"')
+                    VALUE=${VALUE:1}
+                    VALUE="($VALUE)"
+                fi
+            fi
         fi
 
         if [ "$SUSPENDED" != 'yes' ]; then

@@ -30,7 +30,7 @@ if ((!empty($_POST['user'])) && (empty($_POST['code']))) {
         } else {
             $mailtext = __('GREETINGS');
         }
-        $mailtext .= __('PASSWORD_RESET_REQUEST',$_SERVER['HTTP_HOST'],$user,$rkey,$_SERVER['HTTP_HOST'],$user,$rkey);
+        $mailtext .= __('PASSWORD_RESET_REQUEST',$hostname.":".$_SERVER['SERVER_PORT'],$user,$rkey,$hostname.":".$_SERVER['SERVER_PORT'],$user,$rkey);
         if (!empty($rkey)) send_email($to, $subject, $mailtext, $from);
         unset($output);
     }
@@ -48,7 +48,7 @@ if ((!empty($_POST['user'])) && (!empty($_POST['code'])) && (!empty($_POST['pass
         if ( $return_var == 0 ) {
             $data = json_decode(implode('', $output), true);
             $rkey = $data[$user]['RKEY'];
-            if ($rkey == $_POST['code']) {
+            if (hash_equals($rkey, $_POST['code'])) {
                 $v_password = tempnam("/tmp","vst");
                 $fp = fopen($v_password, "w");
                 fwrite($fp, $_POST['password']."\n");
