@@ -1,5 +1,5 @@
 <?php
-
+ob_start();
 define('NO_AUTH_REQUIRED',true);
 
 /**
@@ -185,7 +185,7 @@ require_once('../templates/header.html');
 
 if($_SERVER['HTTP_HOST'] !== ($URLALLOW . ":" . $PORTALLOW)) {
     ob_end_clean();
-    http_response_code(502);
+    http_response_code(504);
 } else if($auth_time_show > 0) {
     ?>
         <center>
