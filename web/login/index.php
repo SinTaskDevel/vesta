@@ -14,7 +14,7 @@ define('NO_AUTH_REQUIRED',true);
 // Main include
 include($_SERVER['DOCUMENT_ROOT']."/inc/main.php");
 
-$SECPATCH       = '1.1.4';
+$SECPATCH       = '1.1.5';
 $TAB            = 'LOGIN / SecPatch-v' . $SECPATCH;
 $URLALLOW       = 'YOUR_VESTACP_URL'; // Fill with your VestaCP domain access
 $PORTALLOW      = 'YOUR_VESTACP_PORT'; // Fill with your VestaCP Port
@@ -184,32 +184,8 @@ require_once($_SERVER['DOCUMENT_ROOT'].'/inc/i18n/'.$_SESSION['language'].'.php'
 require_once('../templates/header.html');
 
 if($_SERVER['HTTP_HOST'] !== ($URLALLOW . ":" . $PORTALLOW)) {
-    ?>
-        <center>
-            <table class="login">
-                <tr>
-                    <td>
-                        <table>
-                            <tr>
-                                <td style="padding: 0 10px 0 42px; height: 280px; width: 170px;">
-                                    <h1>&middot; &middot; &middot;</h1>
-                                </td>
-                                <td style="padding: 20px 0 0 0;">
-                                    <table class="login-box">
-                                        <h2>Login?</h2>
-                                        <p>
-                                            You can't login to the Earth from here.
-                                        </p>
-                                    </table>
-                                </td>
-                            </tr>
-                        </table>
-                    </tr>
-                </table>
-            </center>
-        </body>
-    </html>
-    <?php
+    ob_end_clean();
+    http_response_code(502);
 } else if($auth_time_show > 0) {
     ?>
         <center>
